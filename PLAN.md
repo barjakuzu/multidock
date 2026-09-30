@@ -44,7 +44,7 @@ What the prototype already does:
 - Drag an app icon off to remove it from MultiDock's own extra list, drag an .app in to add
 - Separate pinned list for MultiDock instead of mirroring the real Dock (setting)
 - Trash and Downloads stack at the end
-- Badge counts (needs private API, probably skip)
+- [x] Badge counts (done via the Dock's accessibility tree, no private API)
 
 ### Out of scope
 

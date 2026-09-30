@@ -12,6 +12,7 @@ struct AppEntry {
     let url: URL
     let name: String
     let app: NSRunningApplication?
+    var badge: String? = nil
 }
 
 func key(_ url: URL) -> String {
@@ -29,6 +30,27 @@ func pinnedApps() -> [URL] {
               let s = fd["_CFURLString"] as? String else { return nil }
         return s.hasPrefix("file://") ? URL(string: s) : URL(fileURLWithPath: s)
     }
+}
+
+// Badges ("1", "3", "•") shown on the real Dock, keyed like key(_:). Read through the Dock's
+// accessibility tree, so it needs Accessibility permission; returns [:] without it.
+func dockBadges() -> [String: String] {
+    guard AXIsProcessTrusted(),
+          let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return [:] }
+    func attr(_ e: AXUIElement, _ a: String) -> AnyObject? {
+        var v: AnyObject?
+        return AXUIElementCopyAttributeValue(e, a as CFString, &v) == .success ? v : nil
+    }
+    var result: [String: String] = [:]
+    for list in attr(AXUIElementCreateApplication(dock.processIdentifier), kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+        for item in attr(list, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+            if let badge = attr(item, "AXStatusLabel") as? String, !badge.isEmpty,
+               let url = attr(item, kAXURLAttribute) as? URL {
+                result[key(url)] = badge
+            }
+        }
+    }
+    return result
 }
 
 func collectEntries() -> [AppEntry] {
@@ -54,6 +76,8 @@ func collectEntries() -> [AppEntry] {
             result.append(AppEntry(url: url, name: r.localizedName ?? url.lastPathComponent, app: r))
         }
     }
+    let badges = dockBadges()
+    for i in result.indices { result[i].badge = badges[key(result[i].url)] }
     return result
 }
 
@@ -104,6 +128,21 @@ final class ItemView: NSView {
             NSColor.labelColor.withAlphaComponent(0.8).setFill()
             NSBezierPath(ovalIn: NSRect(x: bounds.midX - 2, y: 4, width: 4, height: 4)).fill()
         }
+        if let badge = entry.badge { drawBadge(badge, iconRect: rect) }
+    }
+
+    // Red pill at the icon's top-right corner, like the real Dock
+    func drawBadge(_ text: String, iconRect: NSRect) {
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                                                    .foregroundColor: NSColor.white]
+        let t = NSAttributedString(string: text, attributes: attrs)
+        let h: CGFloat = 18
+        let w = max(h, t.size().width + 10)
+        let pill = NSRect(x: min(iconRect.maxX - 13, bounds.maxX - w), y: min(iconRect.maxY - 13, bounds.maxY - h),
+                          width: w, height: h)
+        NSColor.systemRed.setFill()
+        NSBezierPath(roundedRect: pill, xRadius: h / 2, yRadius: h / 2).fill()
+        t.draw(at: NSPoint(x: pill.midX - t.size().width / 2, y: pill.midY - t.size().height / 2))
     }
 
     func buildMenu() -> NSMenu {
@@ -177,6 +216,8 @@ final class Controller: NSObject, NSApplicationDelegate {
     var lastSignature = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Asks once for Accessibility permission (needed for badges); everything else works without it
+        AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
         let wc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didLaunchApplicationNotification,
                      NSWorkspace.didTerminateApplicationNotification,
@@ -201,7 +242,7 @@ final class Controller: NSObject, NSApplicationDelegate {
 
         let entries = collectEntries()
         let sig = targets.map { "\(displayID($0))@\(NSStringFromRect($0.frame))" }.joined(separator: ",")
-            + "|" + entries.map { key($0.url) + ($0.app != nil ? "*" : "") }.joined(separator: ",")
+            + "|" + entries.map { key($0.url) + ($0.app != nil ? "*" : "") + ($0.badge.map { "#" + $0 } ?? "") }.joined(separator: ",")
         guard sig != lastSignature else { return }
         lastSignature = sig
 

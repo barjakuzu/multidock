@@ -5,6 +5,7 @@ It mirrors your pinned Dock apps, adds running apps, and uses Liquid Glass on ma
 
 - Finder, then your pinned Dock apps, then other running apps
 - Click to launch or bring an app to the front
+- Notification badges, like the real Dock (needs Accessibility permission)
 - Right-click: Show in Finder, Hide, Quit, Quit MultiDock
 - Follows the real Dock when it moves to another screen (within about 1s)
 - No icon in the Dock or Cmd+Tab, no private APIs, no dependencies
@@ -27,6 +28,9 @@ compiler, for example `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26
 
 Copy `prototype/MultiDock.app` to `/Applications`. The app is ad-hoc signed, so the first time you open it,
 right-click it and choose Open.
+
+Badges need Accessibility permission: System Settings > Privacy & Security > Accessibility > turn on MultiDock.
+After a rebuild, remove MultiDock from that list and add it again (ad-hoc signed builds count as a new app).
 
 To start it at login: System Settings > General > Login Items > add MultiDock.
 
