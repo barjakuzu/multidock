@@ -1,0 +1,5 @@
+MultiDock.app/
+.build/
+*.zip
+.DS_Store
+CLAUDE.md
