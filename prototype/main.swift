@@ -2,6 +2,7 @@
 // Pinned apps are read from your real Dock, running apps are added after them.
 
 import AppKit
+import ServiceManagement
 
 let iconSize: CGFloat = 48
 let itemWidth: CGFloat = 58
@@ -91,6 +92,32 @@ func displayID(_ s: NSScreen) -> CGDirectDisplayID {
     (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) ?? 0
 }
 
+var edgeGuardEnabled: Bool { UserDefaults.standard.object(forKey: "edgeGuard") as? Bool ?? true }
+
+// Experimental: the real Dock jumps to a screen when the pointer is pushed against its bottom edge.
+// On screens that show a MultiDock bar, keep the pointer off the last pixel rows so it never gets there.
+// ponytail: may not work if the Dock reacts to raw mouse deltas instead of the pointer position.
+final class EdgeGuard {
+    var screens: [NSRect] = []   // Cocoa frames of screens with a MultiDock bar
+    let margin: CGFloat = 2
+
+    init() {
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in self?.check() }
+        NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] e in self?.check(); return e }
+    }
+
+    func check() {
+        guard edgeGuardEnabled, let primary = NSScreen.screens.first?.frame else { return }
+        let p = NSEvent.mouseLocation
+        guard let f = screens.first(where: { p.x >= $0.minX && p.x < $0.maxX && p.y >= $0.minY - 1 && p.y < $0.maxY }),
+              p.y < f.minY + margin else { return }
+        // CG coordinates have the origin at the top-left of the primary screen
+        CGWarpMouseCursorPosition(CGPoint(x: p.x, y: primary.maxY - (f.minY + margin)))
+        CGAssociateMouseAndMouseCursorPosition(1)   // skip the short freeze after a warp
+    }
+}
+
 final class ItemView: NSView {
     let entry: AppEntry
     let icon: NSImage
@@ -104,8 +131,9 @@ final class ItemView: NSView {
         addTrackingArea(NSTrackingArea(rect: .zero,
                                        options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                        owner: self, userInfo: nil))
-        menu = buildMenu()
     }
+    // Built on every right-click so checkmarks are always current
+    override func menu(for event: NSEvent) -> NSMenu? { buildMenu() }
     required init?(coder: NSCoder) { fatalError() }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -153,8 +181,28 @@ final class ItemView: NSView {
             m.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "").target = self
         }
         m.addItem(.separator())
+        let guardItem = m.addItem(withTitle: "Stop Dock Jumping Here", action: #selector(toggleEdgeGuard), keyEquivalent: "")
+        guardItem.target = self
+        guardItem.state = edgeGuardEnabled ? .on : .off
+        if #available(macOS 13.0, *) {
+            let login = m.addItem(withTitle: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+            login.target = self
+            login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        }
         m.addItem(withTitle: "Quit MultiDock", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "").target = NSApp
         return m
+    }
+    @objc func toggleEdgeGuard() {
+        UserDefaults.standard.set(!edgeGuardEnabled, forKey: "edgeGuard")
+    }
+    @objc func toggleLogin() {
+        guard #available(macOS 13.0, *) else { return }
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled { try service.unregister() } else { try service.register() }
+        } catch {
+            NSLog("MultiDock: login item change failed: \(error)")
+        }
     }
     @objc func showInFinder() { NSWorkspace.shared.activateFileViewerSelecting([entry.url]) }
     @objc func hideApp() { entry.app?.hide() }
@@ -213,6 +261,7 @@ final class DockPanel: NSPanel {
 
 final class Controller: NSObject, NSApplicationDelegate {
     var panels: [CGDirectDisplayID: DockPanel] = [:]
+    let edgeGuard = EdgeGuard()
     var lastSignature = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -245,6 +294,7 @@ final class Controller: NSObject, NSApplicationDelegate {
             + "|" + entries.map { key($0.url) + ($0.app != nil ? "*" : "") + ($0.badge.map { "#" + $0 } ?? "") }.joined(separator: ",")
         guard sig != lastSignature else { return }
         lastSignature = sig
+        edgeGuard.screens = targets.map(\.frame)
 
         let ids = Set(targets.map(displayID))
         for (id, panel) in panels where !ids.contains(id) {

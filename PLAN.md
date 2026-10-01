@@ -114,7 +114,7 @@ Done when: `swift build`, `swift test` and `scripts/build-app.sh` all succeed, a
 **Track B: Menu bar and settings** (`StatusMenu`, `SettingsWindow`, `Settings`)
 - [ ] Status item with Settings, Refresh, Quit
 - [ ] Settings window with all v1 settings, changes post a notification the controller listens to
-- [ ] Launch at login via `SMAppService`
+- [~] Launch at login via `SMAppService` (right-click toggle in the prototype, not yet confirmed working)
 
 **Track C: Quality** (tests, scripts, docs)
 - [ ] Tests for `Settings` defaults and persistence
